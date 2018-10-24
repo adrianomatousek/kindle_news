@@ -1,5 +1,10 @@
 <?php
-include 'keys.php';
+include '../keys.php';
+include 'images_to_b64.php';
+include 'send_email.php';
+include '../db.php';
+
+$saveDir = "../../Private/";
 
 ini_set('display_startup_errors',1);
 ini_set('display_errors',1);
@@ -12,25 +17,76 @@ echo "Starting up...";
 
 
 
+//jsonTopics();
+
 proccessManager();
 
-function proccessManager() {
-    rrmdir("../Private/");
-    echo "<br>Generating articles";
-    $allBBCArticles = BBC();
-    echo "<br>All articles have been generated";
-    sendNewsPackages($allBBCArticles);
-    echo "Emails have been sent";
+//do_sql();
+
+function do_sql() {
+    $sql = "SELECT * FROM kindle_sites LIMIT 2";
+    $result = $conn->query($sql);
+    
+    if ($result->num_rows > 0) {
+        // output data of each row
+        while($row = $result->fetch_assoc()) {
+            echo '<br>' . $row['newspaper'];
+            echo '<br>' . htmlspecialchars($row['topics']);
+            $json = json_decode($row['topics'], true); //Getting the topics data from json format
+            echo '<br>' . $json['topics'][0]['topic'];
+        }
+    } else {
+        echo "0 results";
+    }
 }
 
+function proccessManager() {
+    global $saveDir;
+    rrmdir($saveDir);
+    echo "<br>Generating articles";
+    
+    //BBC
+    $newspaper = "BBC";
+    $websiteURL = "https://www.bbc.co.uk/";
+    $topics = array("world","uk","business","politics","technology","science_and_environment","health","education","entertainment_and_arts","in_pictures");
+    $pattern = "(<a href=\"/news/(.*?)\" class=\"title-link\">)";
+    //$allBBCArticles = retrieveTopArticles($newspaper,$websiteURL,$topics,$pattern);
+        
+    //Sky
+    $newspaper = "Sky";
+    $websiteURL = "https://news.sky.com/";
+    $topics = array("world","uk","us","business","politics","technology","entertainment");
+    $pattern = "(<a href=\"(.*?)\" class=(.*?)grid__link)";
+    //$allSkyArticles = retrieveTopArticles($newspaper,$websiteURL,$topics,$pattern);
+    
+    /* No longer working - 'suspicious' activity detected
+    //Bloomberg
+    $newspaper = "Bloomberg";
+    $websiteURL = "https://www.bloomberg.com/";
+    $topics = array("markets/economics","wealth","technology","opinion","politics");
+    $pattern = "(<a href=\"(.*?)\" class=\"(.*?)_headline-link\")";
+    $allBloombergArticles = retrieveTopArticles($newspaper,$websiteURL,$topics,$pattern);
+    */
+    
+    echo "<br>All articles have been generated";
+    
+    //sendNewsPackages($allBBCArticles);
+    echo "<br>Emails have been sent";
+}
+
+
+
 function sendNewsPackages($allBBCArticles) {
+    global $saveDir;
     echo "<br>Sending news packages";
     //Customer A wants 4 from every BBC topic
     //Customer B wants 6 from world, technology and uk in that order
-    $AInfo = array("email Matousek","email@gmail.com");
+    /*
+    $AInfo = array("Adriano Matousek","adriano.matousek@gmail.com");
     $A = array("world","uk","business","politics","technology","science_and_environment","health","education","entertainment_and_arts","in_pictures");
-    $BInfo = array("email Matousek","email@gmail.com");
+    $BInfo = array("Adriano Matousek","adriano.matousek@gmail.com");
     $B = array("world","technology","uk");
+    */
     $frontPage = "<br><br>
     <h4 style='text-align: center'>Good morning " . $AInfo[0] . "</h4>
     <br><br>
@@ -47,37 +103,39 @@ function sendNewsPackages($allBBCArticles) {
         }
     }
     $customisedNewspaper = "<html><body>" . $customisedNewspaper . "</body></html>";
-    saveFile("../Private/temp.html", $customisedNewspaper);
-    sendEmail("../Private/temp.html");
+    saveFile($saveDir."/temp.html", $customisedNewspaper);
+    sendEmail($saveDir."temp.html");
 }
 
-function BBC() {
-    $newspaper = "BBC";
+function retrieveTopArticles($newspaper,$websiteURL,$topics,$pattern) {
+    global $saveDir;
+    
     echo "<br>Retrieving articles from the " . $newspaper;
-    if (!is_dir("../Private/" . $newspaper)) {
-        mkdir("../Private/" . $newspaper);  //create folder
+    if (!is_dir($saveDir . $newspaper)) {
+        mkdir($saveDir . $newspaper);  //create folder
     }
-    $websiteURL = "https://bbc.co.uk/news/";
-    $topics = array("world","uk","business","politics","technology","science_and_environment","health","education","entertainment_and_arts","in_pictures");
-    //$topics = array("world","uk");
-
-    $pattern = "(<a href=\"/news/(.*?)\" class=\"title-link\">)";
+    
     foreach ($topics as $topic) {//Get top articles from each topic
-        if (!is_dir("../Private/" . $newspaper . "/" . $topic)) {
-            mkdir("../Private/" . $newspaper . "/" . $topic);  //create folder
+        $safeDir = str_replace("/","_",$topic);
+        //echo "<br>Safe directory: " . $safeDir;
+        //echo "<br>Global dir: " . $saveDir;
+        if (!is_dir($saveDir . $newspaper . "/" . $safeDir)) {
+            echo "<br>Directory: " . $saveDir . $newspaper . "/" . $safeDir;
+            mkdir($saveDir . $newspaper . "/" . $safeDir);  //create folder
         }
         $articleLinks = get_web_page($websiteURL . $topic, $pattern);
+        //echo $articleLinks;
         $count = 0;
         //Get the actual content for each article link
         foreach ($articleLinks as $link) {
-            if (substr($link, 0, 3) !== "av/") {//remove bbc video articles
+            if (substr($link, 0, 3) !== "av/" && substr($link, 0, 3) !== "/vi") {//remove video articles
                 if ($count < 3) {
-                    echo "<br>" . $link;
+                    echo "<br>Link: " . $link;
                     $articleInfo = getArticle($websiteURL . $link);
                     $articleTitle = $articleInfo[1];
                     $articleContent = $articleInfo[0];
                     $processedArticle = imagesToB64($articleContent);
-                    $directory = "../Private/" . $newspaper . "/" . $topic . "/" . $articleTitle . ".html";
+                    $directory = $saveDir . $newspaper . "/" . $topic . "/" . $articleTitle . ".html";
                     saveFile($directory, $processedArticle);
                     ${$topic}[$count] = $processedArticle; 
                     $count = $count + 1;
@@ -94,9 +152,10 @@ function BBC() {
 }
  
 
-function get_web_page($url,$pattern) {
+function get_web_page($url,$pattern) { //Using front page to retrieve the top articles
     //Preparing curl request
     $user_agent='Mozilla/5.0 (Windows NT 6.1; rv:8.0) Gecko/20100101 Firefox/8.0';
+
     $options = array(
         CURLOPT_CUSTOMREQUEST  =>"GET",        //set request type post or get
         CURLOPT_POST           =>false,        //set to GET
@@ -114,6 +173,8 @@ function get_web_page($url,$pattern) {
     );
 
     $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10); 
+    curl_setopt($ch, CURLOPT_TIMEOUT, 4000); //timeout in seconds
     curl_setopt_array($ch, $options);
     $content = curl_exec($ch);
     $err = curl_errno($ch);
@@ -126,14 +187,18 @@ function get_web_page($url,$pattern) {
     $page = (string)$header['content'];
     
     preg_match_all($pattern, $page, $matches); 
+
+    //echo "<br>Complete; match: " . $matches[1][0];
+    foreach ($matches[1] as $aLink) {
+        echo "<br>____________________________LINK: " . $aLink;
+    }
     //Getting all the article links from the page
-    //echo " " . $matches[1][0];
     return $matches[1];
 }
 
 
 function getArticle($url) {
-    require "keys.php";
+    require "../keys.php";
     $ch = curl_init();
     
     curl_setopt($ch, CURLOPT_URL, "https://mercury.postlight.com/parser?url=" . $url);
@@ -146,7 +211,7 @@ function getArticle($url) {
     
     $result = curl_exec($ch);
     if (curl_errno($ch)) {
-        echo 'Error:' . curl_error($ch);
+        echo '<br>Error:' . curl_error($ch);
     }
     curl_close ($ch);
     
@@ -166,103 +231,54 @@ function getArticle($url) {
     return array($article,$title);
 }
 
-function imagesToB64($string) {
-    //Converts all img links to Base64 encodes
-    //This allows us to maintain simplicity of generating 1 file
-    //With a drawback of (slightly) larger image size
-    $out = preg_replace_callback(
-    "(src=\"(.*?)\")",
-    function($match) {
-        static $id = 0;
-        $id++;
-        $path = $match[1];
-        $type = pathinfo($path, PATHINFO_EXTENSION);
-        $curl = curl_init($path);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true );
-        $ret_val = curl_exec($curl);
-        $b64_image_data =  chunk_split(base64_encode($ret_val));
-        curl_close($curl);
-        return 'src="data:image/' . $type . ';base64,' . $b64_image_data . '" style="width:100%"';
-    },
-    $string);
-    return $out;
-}
-
 function saveFile($dir,$data){
     file_put_contents($dir,$data);
 }
 
-
-function sendEmail($attachment) {
-    $to = "email@kindle.com"; 
-    $from = "email@matousek.co.uk"; 
-    $subject = "News Article HTML"; 
-    $message = "Please see attachment";
-    
-    // a random hash will be necessary to send mixed content
-    $separator = md5(time());
-    
-    // carriage return type (we use a PHP end of line constant)
-    $eol = PHP_EOL;
-    
-    /*
-    // attachment name
-    
-    //$filename = "BBC-News-" . date("h:i:sa") . ".html";
-    $filename = basename($attachment).PHP_EOL;//Name of file
-    
-    // encode data (puts attachment in proper format)
-    
-    $attachment = chunk_split(base64_encode(file_get_contents($attachment)));
-    */
-    $path = $attachment;
-    // Read the file content
-    $filename = "Hello.html";
-    $file = $path;
-    $file_size = filesize($file);
-    $handle = fopen($file, "r");
-    $content = fread($handle, $file_size);
-    fclose($handle);
-    $content = chunk_split(base64_encode($content));
-    //echo "<br>" . $content;
-    $attachment = $content;
-    
-    // main header
-    $headers  = "From: ".$from.$eol;
-    $headers .= "MIME-Version: 1.0".$eol; 
-    $headers .= "Content-Type: multipart/mixed; boundary=\"".$separator."\"";
-    
-    // no more headers after this, we start the body! //
-    
-    $body = "--".$separator.$eol;
-    $body .= "Content-Transfer-Encoding: 7bit".$eol.$eol;
-    $body .= "This is a MIME encoded message.".$eol;
-    
-    // message
-    $body .= "--".$separator.$eol;
-    $body .= "Content-Type: text/html; charset=\"iso-8859-1\"".$eol;
-    $body .= "Content-Transfer-Encoding: 8bit".$eol.$eol;
-    $body .= $message.$eol;
-    
-    // attachment
-    $body .= "--".$separator.$eol;
-    $body .= "Content-Type: application/octet-stream; name=\"".$filename."\"".$eol; 
-    $body .= "Content-Transfer-Encoding: base64".$eol;
-    $body .= "Content-Disposition: attachment".$eol.$eol;
-    $body .= $attachment.$eol;
-    $body .= "--".$separator."--";
-    
-    // send message
-    if (mail($to, $subject, $body, $headers)) {
-    echo "<br>Success!";
-    } else {
-    echo "Failed to send email";
+function jsonTopics(){//Handy for creating new topics
+    $topics = array("world","uk","us","business","politics","technology","entertainment");
+    /*$json = '{
+    "topics": [
+            { "topic":"world", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"},
+            { "topic":"uk", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"}
+        ]
+    }';*/
+    echo ' "topics": [';
+    foreach($topics as $item){
+        echo '{"topic":"';
+        echo $item;
+        echo addslashes(htmlspecialchars('", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"},'));
     }
+    echo ']}';
+    /*
+    $json = json_decode($json,true);
+    echo "<br>";
+    echo $json["topics"][0]["topic"];
+    */
     
-} 
+    //$json = '"topics": [{"topic":"world", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"},{"topic":"uk", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"},{"topic":"us", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"},{"topic":"business", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"},{"topic":"politics", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"},{"topic":"technology", "pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"},{"topic":"entertainment","pattern":"(<a href=\"/news/(.*?)\" class=\"title-link\">)"}]}';
+
+$pattern = "(<a href=\"/news/(.*?)\" class=\"title-link\">)";
+$pattern = addslashes($pattern);
+$json = '{
+"topics": [
+        { "topic":"world", "pattern":"'.$pattern.'"},
+        { "topic":"uk", "pattern":"'.$pattern.'"}
+    ]
+}';
+$json = json_decode($json,true);
+
+echo '<br>New topic: ' . htmlspecialchars(addslashes($json['topics'][1]['pattern']));
+//
+
+}
+
 
 function rrmdir($dir) {
-    if (is_dir($dir)) {
+    //echo "<br>Removing dir: " . $dir;
+    $folderName = explode("/",explode("../../",$dir)[1])[0];
+    //echo "<br> " . $folderName;
+    if (is_dir($dir) && $folderName == "Private") {
     $objects = scandir($dir);
     foreach ($objects as $object) {
       if ($object != "." && $object != "..") {
@@ -273,6 +289,8 @@ function rrmdir($dir) {
     }
     reset($objects);
     //rmdir($dir);
+    } else {
+        echo "<br>Error: failed to remove directory";
     }
 }
 
